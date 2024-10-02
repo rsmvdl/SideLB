@@ -18,6 +18,7 @@ fi
 # Build the Docker image for the Rust project
 echo "Building SideLB v. $SIDE_LB_VERSION"
 docker build \
+    -f Docker_Binary_Builder \
     --build-arg SIDE_LB_VERSION="$SIDE_LB_VERSION" \
     --tag=sidelb:static \
     --output type=local,dest=build .

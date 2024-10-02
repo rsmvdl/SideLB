@@ -1,0 +1,14 @@
+services:
+  sidelb:
+    build:
+      context: .
+    image: sidelb
+    container_name: sidelb
+    hostname: sidelb
+    env_file:
+      - .env
+    ports:
+      - "443:443"
+    networks:
+      - default
+    restart: unless-stopped

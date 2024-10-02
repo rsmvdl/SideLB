@@ -1,0 +1,56 @@
+# Docker_Binary_Builder
+FROM ubuntu:24.04 AS build
+
+# Set the environment variable to prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install necessary packages for building, and add curl to download rustup.
+# We remove rustc and cargo from here as we'll install the latest via rustup.
+RUN apt-get update && \
+    apt-get -y install \
+        git \
+        curl \
+        cmake \
+        autoconf \
+        automake \
+        build-essential \
+        libfontconfig1-dev \
+        pkg-config \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set up environment for rustup and add cargo to PATH
+# This ensures subsequent RUN commands use the rustup-installed version.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+# Download and install rustup, then install the latest stable Rust toolchain.
+# The -y flag accepts defaults and runs non-interactively.
+# --default-toolchain stable ensures we get the latest stable release.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable -y
+
+# Update CA certificates
+RUN update-ca-certificates
+
+# Clone the specific tag from the Git repository (or copy local source)
+WORKDIR /app
+ADD . .
+
+# Build the project using the newly installed latest stable Rust
+RUN cargo build --release
+
+# Run tests (Currently not existing, only placeholder)
+# RUN cargo test --release
+
+# Verify that the build was successful
+RUN if [ ! -f /app/target/release/sidelb ]; then \
+        echo "Build failed: sidelb binary not found!" >&2; \
+        exit 1; \
+    fi
+
+# Create final, minimal image
+FROM scratch
+
+# Copy sidelb binary
+COPY --from=build /app/target/release/sidelb /sidelb

@@ -1,31 +1,53 @@
-# Dockerfile
-FROM ubuntu:24.04 AS build
+FROM debian:bookworm-slim AS rust_builder
 
-# Set the environment variable to the value of the build argument
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install necessary packages
 RUN apt-get update && \
-    apt-get -y install git rustc cargo cmake autoconf automake build-essential libfontconfig1-dev pkg-config ca-certificates
+    apt-get -y install --no-install-recommends \
+        git \
+        curl \
+        cmake \
+        autoconf \
+        automake \
+        build-essential \
+        libfontconfig1-dev \
+        pkg-config \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# Update CA certificates
-RUN update-ca-certificates
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
 
-# Clone the specific tag from the Git repository
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable -y
+
 WORKDIR /app
 ADD . .
 
-# Build the project
-RUN cargo build --release
+RUN cargo build --release --locked
 
-# Run tests (Currently not existing, only placeholder)
-# RUN cargo test --release
+RUN if [ ! -f /app/target/release/sidelb ]; then \
+        echo "Build failed: sidelb binary not found!" >&2; \
+        exit 1; \
+    fi
 
-# Verify that the build was successful
-RUN if [ ! -f /app/target/release/sidelb ]; then exit 1; fi
+FROM debian:bookworm-slim AS final_image
 
-# Create final, minimal image
-FROM scratch
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Copy webdav_bandwidth_calc
-COPY --from=build /app/target/release/sidelb /sidelb
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=rust_builder /app/target/release/sidelb /usr/local/bin/sidelb
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/sidelb && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD /usr/local/bin/sidelb --health-check-uds || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["sidelb-daemon"]

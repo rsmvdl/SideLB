@@ -1,0 +1,11 @@
+.env
+.git
+.github
+.gitignore
+.gitlab-ci.yml
+.idea
+.editorconfig
+Dockerfile
+README.md
+docker-compose.yml
+trigger.sh

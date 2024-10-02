@@ -1,0 +1,110 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install cross for cross-compiling
+        run: cargo install cross
+
+      - name: Extract version from Cargo.toml
+        id: get_version
+        run: |
+          VERSION=$(grep -m 1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "Error: Version not found in Cargo.toml" >&2
+            exit 1
+          fi
+          echo "Extracted VERSION: $VERSION"
+          echo "$VERSION" > version.txt
+          echo "VERSION=$VERSION" >> $GITHUB_ENV  # Set it as an environment variable for future steps
+
+      - name: Upload version as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: version
+          path: version.txt
+
+      - name: Run trigger.sh to build app
+        run: ./trigger.sh
+
+      - name: Build binary for Linux x86-64 using cross
+        run: |
+          cross build --release --target x86_64-unknown-linux-gnu
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: Build binary for Linux aarch64 using cross
+        run: |
+          cross build --release --target aarch64-unknown-linux-gnu
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: Rename binaries before uploading
+        run: |
+          mv ./target/x86_64-unknown-linux-gnu/release/sidelb ./sidelb-x86_64
+          mv ./target/aarch64-unknown-linux-gnu/release/sidelb ./sidelb-aarch64
+
+      - name: Upload renamed built artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideLB-binaries
+          path: |
+            sidelb-x86_64
+            sidelb-aarch64
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Only release from the main branch
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: version
+
+      - name: Read version from file and set environment variable
+        id: read_version
+        run: |
+          VERSION=$(cat version.txt)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV  # Set it as an environment variable for later steps
+
+      - name: Download renamed built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: SideLB-binaries
+
+      - name: Create GitHub tag with force-push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -f v$VERSION  # Overwrite local tag if it exists
+          git push -f origin v$VERSION  # Force-push to overwrite remote tag
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: "Release v${{ env.VERSION }}"
+          files: |
+            sidelb-x86_64
+            sidelb-aarch64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

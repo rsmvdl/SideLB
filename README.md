@@ -1,188 +1,89 @@
-# SideLB – Sidecar Load Balancer, a lightweight service load balancer that runs beside your actual Application
+SideLB (Sidecar Load Balancer) is a lightweight, efficient **TCP/UDP service load balancer** and **Layer 4 reverse proxy**.
+It's designed to distribute network traffic across your backend services, acting as a public-facing entry point or running alongside your application (as a "sidecar"). This makes it especially useful for decentralized services and containerized environments using Docker, Podman, or containerd.
 
-SideLB manages traffic between your service (a server backend, …) and other services (databases, caching clusters, …). It provides robust and efficient load balancing for backends that require seamless integration with decentralized services, no matter the protocol.
+SideLB is written in Rust and primarily based on the Tokio library.
 
-SideLB supports infrastructures built for decentralized applications. E.g., you can run it in the same container as your application, this is actually the idea.
+## Key Features
 
-SideLB is written in Rust and primarily based on the tokio library.
+-   **TCP/UDP Load Balancing:** Distributes traffic for both TCP and UDP based services.
+-   **Layer 4 Reverse Proxy:** Forwards network connections/packets at the transport layer without inspecting application-layer data.
+-   **Flexible Backend Discovery:**
+    -   **Dynamic DNS (`ring_domain`):** Discovers backend instances by resolving a domain name (A/AAAA records).
+    -   **Static IP List:** Allows specification of fixed backend IP addresses.
+    -   **Unified Pool:** Treats dynamically discovered and statically listed backends as a single pool for load balancing.
+-   **Load Balancing Algorithms:**
+    -   `round-robin`: Evenly distributes connections.
+    -   `least-connections`: Sends traffic to the server with the fewest active connections.
+-   **Health Monitoring:** Continuously checks backend server availability and routes traffic only to healthy instances.
+-   **IP Grouping:** Can group multiple ports on the same backend IP address for health checking and connection management.
+-   **Container-Friendly:** Easily deployable with Docker, Podman, containerd, and configurable via command-line arguments or environment variables (when using the provided Docker entrypoint).
+-   **Lightweight & Efficient:** Minimal resource footprint.
 
-## Key features
+## Configuration via Environment Variables
 
-- **Perform DNS and reverse DNS (rDNS) resolution** to discover both IPv4 and IPv6 members of a domain. For example, in a decentralized CockroachDB or YugabyteDB setup, a domain like db.example.com may resolve to multiple IP addresses (e.g., 10 IPv4 and 10 IPv6 addresses). SideLB leverages DNS/rDNS resolution to intelligently distribute traffic across all available servers.
-- **Group multiple IP addresses belonging to the same server and treats them as a single entity**. This prevents server with multiple public IPs from being overburdened. (Note that DNS/rDNS must be setup correctly!)
-- **No protocol overhead**. SideLB is purpose-built for TCP/UDP traffic and does not handle HTTP or other service-specific protocols directly. This makes it particularly suited for routing database queries and other low-level service communications.
-- **Continuously monitor the availability of each server**, ensuring traffic is only routed to healthy servers. It supports two key load balancing algorithms: 
-    1) round-robin: Evenly distributes traffic across all available servers, and 
-    2) least-connections: Routes traffic to the server with the fewest active connections.
+When running SideLB using the provided Docker image and its entrypoint (`sidelb-daemon` command or default execution), you can configure it using the following environment variables. These variables are used by the entrypoint script to construct the necessary command-line arguments for the `sidelb` executable.
 
-## Setup structure example
+---
 
-```
-                                        +----------------------+
-                                        |       Request        |
-                                        +----------------------+
-                                                   |
-                                                   v
-                                        +----------------------+
-                                        | Backend Application  |
-                                        +----------------------+
-                                                   |
-                                                   v
-                                        +----------------------+
-                                        |         SideLB       |   
-                                        |    127.0.0.1:5432    |
-+-----------------------------------------------------------------------------------------------------+ -> db.example.com
-        |                    |                     |                    |                    |
-        v                    v                     v                    v                    v
-+-----------------+  +-----------------+  +-----------------+  +-----------------+  +-----------------+
-|  PostgreSQL 1   |  |  PostgreSQL 2   |  |  PostgreSQL 3   |  |  PostgreSQL 4   |  |  PostgreSQL 5   |
-| 203.0.113.1:5432|  | 203.0.113.2:5432|  | 203.0.113.3:5432|  | 203.0.113.4:5432|  | 203.0.113.5:5432|
-| 2001:db8::1:5432|  | 2001:db8::2:5432|  | 2001:db8::3:5432|  | 2001:db8::4:5432|  | 2001:db8::5:5432|
-+-----------------+  +-----------------+  +-----------------+  +-----------------+  +-----------------+
-```
+**`SIDELB_BIND_ADDR`**
 
-# Usage
+* **Description:** Specifies the IP address and port on which SideLB will listen for incoming traffic. This is the primary listening interface for the load balancer.
+* **Mandatory/Optional:** Mandatory.
+* **Default Value:** None. The entrypoint script will exit with an error if this is not set.
+* **Example:** `SIDELB_BIND_ADDR="0.0.0.0:8080"` (Listens on port 8080 on all available network interfaces)
+* **Corresponding CLI Argument:** `<bind_addr:bind_port>` (the first positional argument)
 
-Your backend connects to SideLB, which then forwards the traffic to the appropriate backend services.
-You can specify either static IP addresses for backend services or a ring domain (ring_domain) for dynamic DNS resolution.
+---
 
-Example Command:
+**`SIDELB_BACKENDS`**
 
-```bash
-sidelb 127.0.0.1:5432 ring_domain=db.example.com:5432 mode=round-robin
-```
+* **Description:** Provides a comma-separated list of static backend server addresses, each in `IP:port` format. SideLB will distribute traffic among these configured servers.
+* **Mandatory/Optional:** Optional, but SideLB requires backend servers to operate. At least one of `SIDELB_BACKENDS` or `SIDELB_RING_DOMAIN` (or both) must be configured with valid backend information for SideLB to start and route traffic.
+* **Default Value:** None (empty).
+* **Example:** `SIDELB_BACKENDS="192.168.1.10:80,192.168.1.11:8000"`
+* **Corresponding CLI Argument:** `backends=<value>` (e.g., `backends=192.168.1.10:80,192.168.1.11:8000`)
 
-In this example:
+---
 
-- `127.0.0.1:5432` is the address where SideLB listens for incoming connections from your backend.
-- `ring_domain=db.example.com` allows SideLB to dynamically resolve backend IPs using DNS, e.g. your CockroachDB cluster.
-- `mode=round-robin` ensures that traffic is evenly distributed across all resolved backend service members.
-- `proto=tcp/udp` Set the desired protocol to use, you can select between TCP and UDP
+**`SIDELB_MODE`**
 
-Command with static IP addresses:
+* **Description:** Sets the load balancing algorithm used to distribute traffic to backend servers.
+* **Mandatory/Optional:** Optional.
+* **Default Value:** `round-robin`
+* **Available Values:**
+    * `round-robin`: Distributes connections sequentially among the available healthy backends.
+    * `least-connections`: Sends new connections to the healthy backend with the fewest active connections.
+* **Example:** `SIDELB_MODE="least-connections"`
+* **Corresponding CLI Argument:** `mode=<value>` (e.g., `mode=least-connections`)
 
-```bash
-sidelb 127.0.0.1:5432 100.100.100.103:5432 100.100.100.104:5432 mode=least-connections
-```
+---
 
-Here, SideLB forwards traffic from `127.0.0.1:5432` to `100.100.100.103:5432` and `100.100.100.104:5432`.
+**`SIDELB_PROTO`**
 
-Additionally, you can also manually select the protocol you want to load balance (TCP/UDP), just simply do:
+* **Description:** Defines the network protocol (TCP or UDP) for which SideLB will balance traffic. All backends (static and dynamic) will be assumed to operate over this protocol.
+* **Mandatory/Optional:** Optional.
+* **Default Value:** `tcp`
+* **Available Values:** `tcp`, `udp`
+* **Example:** `SIDELB_PROTO="udp"`
+* **Corresponding CLI Argument:** `proto=<value>` (e.g., `proto=udp`)
 
-```bash
-sidelb 127.0.0.1:5432 100.100.100.103:5432 100.100.100.104:5432 mode=least-connections proto=tcp
-```
-or using the ring_domain respectively
-```bash
-sidelb 127.0.0.1:5432 ring_domain=db.example.com:5432 mode=round-robin proto=tcp
-```
-and so on
+---
 
+**`SIDELB_RING_DOMAIN`**
 
-This will 
+* **Description:** Specifies a DNS domain name that SideLB will periodically resolve to discover backend IP addresses dynamically. SideLB will look for A/AAAA records for this domain. The port specified as part of this value is the port SideLB will attempt to connect to on the resolved IP addresses.
+* **Mandatory/Optional:** Optional, but SideLB requires backend servers to operate. At least one of `SIDELB_BACKENDS` or `SIDELB_RING_DOMAIN` (or both) must be configured with valid backend information for SideLB to start and route traffic.
+* **Default Value:** None.
+* **Example:** `SIDELB_RING_DOMAIN="my-app-backends.example.com:8000"` (SideLB will resolve `my-app-backends.example.com` and connect to the resulting IPs on port `8000`)
+* **Corresponding CLI Argument:** `ring_domain=<value>` (e.g., `ring_domain=my-app-backends.example.com:8000`)
+
+---
 
 ## Known Limitations
 
-- **Load balancing is only relative with SideLB, as most likely many containers or servers consuming a service like a Database and SideLB instances don't communicate with each other at all ...
-- **SSL/TLS Name Validation:** When using SSL/TLS between the backend and the target servers, name validation may need to be disabled or explicitly add `127.0.0.1` to your certs. Since the backend communicates with SideLB over `127.0.0.1`, which then forwards the request to the target server, the original domain name might not match the SSL certificate. This can lead to SSL name validation errors unless explicitly turned off.
+-   **No Layer 7 Features:** SideLB does not inspect or manipulate application-layer data (e.g., HTTP headers, paths, cookies).
+    It is not a replacement for Layer 7 proxies like Nginx or HAProxy if you need those features.
 
-  For example, when you're using the Django framework you would set the following for your Database settings:
-  ```
-    'sslmode': 'verify-ca',  # Changed from 'verify-full' to 'verify-ca' to skip hostname verification
-  ```
+## Future Ideas / Roadmap
 
-## How to build?
-Compiling SideLB is fairly easy, you simply run the included trigger.sh script locally, this will spin-up an Ubuntu 24.04
-container compiling the software for you (Docker required), the final executable binary is than available at the /build folder
-as the compiled binary is simply getting copied from the Docker Container to your local filesystem.
-```bash
-./trigger.sh
-```
-
-## Implementation example inside a container
-
-Many developers that build containers using supervisord to manage processes spawned inside there container(s).
-The same way you can do it with SideLB, simply include the binary at e.g. /usr/bin of you container, make it executable
-and start an instance like so:
-
-```
-[program:SideLB]
-user=my_user
-autostart=true
-autorestart=true
-command=sidelb_flow
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stdout_logfile_backups=0
-redirect_stderr=true
-killasgroup=true
-stopasgroup=true
-priority=100
-
-[program:ExampleApp]
-user=my_user
-autostart=true
-autorestart=true
-command=app_exec_command
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stdout_logfile_backups=0
-redirect_stderr=true
-killasgroup=true
-stopasgroup=true
-priority=200
-```
-
-the sidelb_flow script is just an example here, you can also implement this otherwise, but this is how I did it in combination
-with env variables:
-
-```
-#!/usr/bin/env bash
-
-function sidelb_exec {
-echo "Starting SideLB"
-
-# Use environment variables to form the sidelb command
-sidelb 127.0.0.1:${DATABASE_PORT} ring_domain="${DATABASE_ENDPOINT}:${DATABASE_PORT}" mode=${SIDELB_MODE}
-}
-
-sidelb_exec
-```
-With this setup, your application connects to the database through 127.0.0.1:${DATABASE_PORT}, e.g. port 5432 for postgres.
-SideLB then resolves the ring_domain, which points to the actual database service consisting of multiple IPs, 
-and forwards the request to one of these resolved IP addresses using the selected load balancing algorithm.
-
-
-## Who Should Use SideLB?
-
-- **Developers working with microservices or decentralized services like Redis, CockroachDB or YugabyteDB, where traffic needs to be efficiently routed across multiple service nodes.
-- **Teams deploying applications where an embedded load balancer is required for efficient traffic management like communicating with decentralized services.
-- **Environments where external load balancers are unnecessary or add unwanted complexity, as SideLB provides a lightweight, embedded alternative.
-
-## Requirements
-
-- **A Domain name under your control
-- **A service you want to reach using SideLB, e.g. CockRoachDB or similar that exists on the Public Web or private infrastructure
-
-## Final tough's and notices
-I developed SideLB as part of a larger project that heavily relays on decentralization, especially for the Database communication. 
-This way I wasn't in need anymore to manage and/or rent load balancer resources on platforms like AWS, Digitalocean, Google etc.
-as the application itself is now able to load balance connections by itself with a certain service endpoint.
-
-If you set up a decentralized service like a CockRoachDB or similar, consider to split them up into Geo-Zones on DNS side, like:
-
-- us.database.com (100.100.100.103, 100.100.100.104, 100.100.100.105)
-  - -> node01.us.my-service.com - 100.100.100.103
-  - -> node02.us.my-service.com - 100.100.100.104
-  - -> node03.us.my-service.com - 100.100.100.105
-- de.database.com (101.100.100.103, 101.100.100.104, 101.100.100.105)
-  - -> node01.de.my-service.com - 101.100.100.103
-  - -> node02.de.my-service.com - 101.100.100.104
-  - -> node03.de.my-service.com - 101.100.100.105
-- fr.database.com (102.100.100.103, 102.100.100.104, 102.100.100.105)
-  - -> node01.fr.my-service.com - 102.100.100.103
-  - -> node02.fr.my-service.com - 102.100.100.104
-  - -> node03.fr.my-service.com - 102.100.100.105
-
-Ensure that each node’s IP points to its corresponding geographic subdomain like us.database.com ...
-This way you can make sure that your application always communicates with a group of servers that are geographically near to each other.
+-   **Basic DDoS Protection Mechanisms:** Simple measures such as connection rate limiting per IP or basic SYN flood filtering at the TCP level.
