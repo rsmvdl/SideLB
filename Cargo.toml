@@ -1,0 +1,19 @@
+[package]
+name = "sidelb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.40", features = ["net", "sync", "rt", "macros"] }
+chrono = "0.4.38"
+trust-dns-resolver = "0.23.2"
+
+[dependencies.async-std]
+version = "1.13.0"
+features = ["attributes"]
+
+[profile.release]
+lto = "thin"
+debug = 0
+opt-level = "z"
+panic = "abort"
