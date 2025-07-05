@@ -83,11 +83,15 @@ When running SideLB using the provided Docker image and its entrypoint (`sidelb-
 
 ### To Load balancer a Ring domain:
 
+```
 sidelb <bind_addr:bind_port> [mode=<load_balancer_mode>] [proto=<tcp|udp>] [ring_domain=<ring_domain:port>]
+```
 
 ### To Load balance a specific set of IPs:
 
+```
 sidelb <bind_addr:bind_port> [mode=<load_balancer_mode>] [proto=<tcp|udp>] [backends=ip1:port1,ip2:port2,...]
+```
 
 
 ## Known Limitations
