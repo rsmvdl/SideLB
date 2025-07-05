@@ -79,6 +79,17 @@ When running SideLB using the provided Docker image and its entrypoint (`sidelb-
 
 ---
 
+## Examples:
+
+### To Load balancer a Ring domain:
+
+sidelb <bind_addr:bind_port> [mode=<load_balancer_mode>] [proto=<tcp|udp>] [ring_domain=<ring_domain:port>]
+
+### To Load balance a specific set of IPs:
+
+sidelb <bind_addr:bind_port> [mode=<load_balancer_mode>] [proto=<tcp|udp>] [backends=ip1:port1,ip2:port2,...]
+
+
 ## Known Limitations
 
 -   **No Layer 7 Features:** SideLB does not inspect or manipulate application-layer data (e.g., HTTP headers, paths, cookies).
